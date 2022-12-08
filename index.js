@@ -1,12 +1,16 @@
+
 const express = require('express');
 var request = require('request');
 var querystring = require('querystring');
 
+const NODE_ENV = process.env.NODE_ENV || 'development';
+require('dotenv').config({
+    path: `.env.${NODE_ENV}`
+});
+
 const app = express();
 
-const client_id = '49ce1785bb8b4745b1a51581d9d6e204'; // Your client id
-const client_secret = '5185a0f060914413a2765700d9f49455'; // Your secret
-const redirect_uri = 'http://localhost:8888/top'; //
+
 
 app.get('/', function(req, res) {
 
@@ -14,9 +18,9 @@ app.get('/', function(req, res) {
     res.redirect('https://accounts.spotify.com/authorize?' +
       querystring.stringify({
         response_type: 'code',
-        client_id: client_id,
+        client_id: process.env.CLIENT_ID,
         scope: scope,
-        redirect_uri: redirect_uri
+        redirect_uri: process.env.REDIRECT_URI
       }));
   });
 
@@ -28,11 +32,11 @@ app.get('/top', function(req, res) {
     url: 'https://accounts.spotify.com/api/token',
     form: {
         code: code,
-        redirect_uri: redirect_uri,
+        redirect_uri: process.env.REDIRECT_URI,
         grant_type: 'authorization_code'
     },
     headers: {
-        'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64'))
+        'Authorization': 'Basic ' + (new Buffer.from(process.env.CLIENT_ID + ':' + process.env.CLIENT_SECRET).toString('base64'))
     },
     json: true
     };
@@ -53,6 +57,8 @@ app.get('/top', function(req, res) {
         
               // use the access token to access the Spotify Web API
               request.get(options, function(error, response, body) {
+
+                
 
                 const title = body.items[0].name
                 const artist = body.items[0].artists.map((_artist) => _artist.name).join(', ')
