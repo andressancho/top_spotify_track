@@ -1,11 +1,10 @@
-// import { initializeApp } from "firebase/app";
 const firebase = require('firebase/app')
 const firestore = require('firebase/firestore')
 
+const axios = require('axios')
 const express = require('express');
-var request = require('request');
-var querystring = require('querystring');
-var userId = ''
+const querystring = require('querystring');
+let userId = '00'
 
 
 const firebaseConfig = {
@@ -30,115 +29,141 @@ require('dotenv').config({
 
 const app = express();
 
+const accountsAxios = axios.create();
+const customAxios = axios.create();
 
+accountsAxios.interceptors.request.use(function (config) {
+    const headers = {
+            'Authorization': 'Basic ' + (new Buffer.from(process.env.CLIENT_ID + ':' + process.env.CLIENT_SECRET).toString('base64')),
+            "Content-Type": "application/x-www-form-urlencoded"
+    }
+    config.headers = headers;
+    return config;
+  }, function (error) {
+    return Promise.reject(error);
+  });
+
+  customAxios.interceptors.request.use(async function (config) {
+    const docRef = firestore.doc(db, "users", userId);
+    const doc = await firestore.getDoc(docRef);
+    
+    if (doc.exists()) {
+        const headers = {
+            'Authorization': 'Bearer ' + doc.data().access_token,
+            "Content-Type": "application/json"
+        };
+        config.headers = headers;
+    } 
+    return config;
+  }, function (error) {
+    return Promise.reject(error);
+  });
+
+customAxios.interceptors.response.use(function (response) {
+    return response;
+  }, async function (error) {
+    let originalRequest = error.config;
+    if(error.response.status === 401){
+        const docRef = firestore.doc(db, "users", userId);
+        const doc = await firestore.getDoc(docRef);
+        
+        if (doc.exists()) {
+            const params = {
+                grant_type: 'refresh_token',
+                refresh_token: doc.data().refresh_token
+            };
+        
+            return accountsAxios.post('https://accounts.spotify.com/api/token',querystring.stringify(params)
+            ).then(async response => {
+                const access_token = response.data.access_token;
+                const userRef = firestore.doc(db, 'users', userId);
+                await firestore.setDoc(userRef, {access_token}, { merge: true });   
+                return customAxios(originalRequest);
+            }).catch(err => {
+                console.log(err);
+            });
+        } 
+    }
+    return Promise.reject(error);
+  });
 
 app.get('/', function(req, res) {
 
-    var scope = 
-    'user-read-private user-read-email user-top-read';
+    const scope = 'user-read-private user-read-email user-top-read';
     res.redirect('https://accounts.spotify.com/authorize?' +
         querystring.stringify({
         response_type: 'code',
         client_id: process.env.CLIENT_ID,
         scope: scope,
         redirect_uri: process.env.REDIRECT_URI
-        }));
-  
+        }));  
   });
 
-  app.get('/getToken', function(req, res) {
+app.get('/getToken', function(req, res) {
 
-    var code = req.query.code || null;
-
-    var authOptions = {
-    url: 'https://accounts.spotify.com/api/token',
-    form: {
+    const code = req.query.code || null;
+    const params = {
         code: code,
         redirect_uri: process.env.REDIRECT_URI,
         grant_type: 'authorization_code'
-    },
-    headers: {
-        'Authorization': 'Basic ' + (new Buffer.from(process.env.CLIENT_ID + ':' + process.env.CLIENT_SECRET).toString('base64'))
-    },
-    json: true
     };
 
-    request.post(authOptions, function(error, response, body) {
-        if (!error && response.statusCode === 200) {
-            var access_token = body.access_token,
-                refresh_token = body.refresh_token;
+    accountsAxios.post('https://accounts.spotify.com/api/token',querystring.stringify(params)
+    ).then(response => {
             
-            var options = {
-                url: 'https://api.spotify.com/v1/me',
-                headers: { 'Authorization': 'Bearer ' + access_token },
-                json: true
-            };
-        
-               
-            request.get(options, async function(error, response, body) {
+        const access_token = response.data.access_token,
+                refresh_token = response.data.refresh_token;
 
-                var name = body.display_name,
-                email = body.email;
+        console.log(response.data)
 
-                const user = { 
-                    access_token,
-                    refresh_token,
-                    name,
-                    email }
-                userId = body.id
-
-                const cityRef = firestore.doc(db, 'users', userId);
-                await firestore.setDoc(cityRef, user, { merge: true });            
-               
-                res.status(200).send(user)
-            });
- 
+        const headers = {
+            'Authorization': 'Bearer ' + access_token ,
+            "Content-Type": "application/json"
         }
-        else{
-            res.json(body);
-        }
-    });
+        axios.get('https://api.spotify.com/v1/me',{headers}).then(async response =>{
+            const{display_name,email} = response.data;
+            const user = { 
+                access_token,
+                refresh_token,
+                display_name,
+                email };
+            userId = response.data.id;
 
+            const userRef = firestore.doc(db, 'users', userId);
+            await firestore.setDoc(userRef, user, { merge: true });            
+            
+            res.send(user)
+
+        }).catch(err => {
+            res.status(400).json({ status:400 , msg: 'Error' });
+        })
+            
+    }).catch(err => {
+        res.status(400).json({ status:400 , msg: 'Error' });
+    })
     
   });
 
 
 app.get('/top', async function(req, res) {
-    const docRef = firestore.doc(db, "users", userId);
-    const docSnap = await firestore.getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      console.log("Document data:", docSnap.data());
-    } else {
-      // doc.data() will be undefined in this case
-      console.log("No such document!");
-    }
 
-    var options = {
-        url: 'https://api.spotify.com/v1/me/top/tracks?'+ 
-        querystring.stringify({
-            time_range: 'short_term',
-            limit: '10'
-        }),
-        headers: { 'Authorization': 'Bearer ' + docSnap.data().access_token },
-        json: true
-    };
 
-      // use the access token to access the Spotify Web API
-    request.get(options, function(error, response, body) {
+    customAxios.get('https://api.spotify.com/v1/me/top/tracks?'+ 
+    querystring.stringify({
+        time_range: 'short_term',
+        limit: '10'
+    })).then(response =>{
 
-        var listOfSongs = []
-        var title = '', artist = '', album = '', popularity = '', albumImageUrl = '', songUrl = '';
+        let listOfSongs = []
 
-        body.items.forEach((song)=>{
-            title = song.name
-            artist = song.artists.map((_artist) => _artist.name).join(', ')
-            album = song.album.name
-            popularity = song.popularity
-            albumImageUrl = song.album.images[0].url
-            songUrl =  song.external_urls.spotify
+        response.data.items.forEach((song)=>{
+            const {name, popularity } = song;
+            const artist = song.artists.map((_artist) => _artist.name).join(', ')
+            const album = song.album.name
+            const albumImageUrl = song.album.images[0].url
+            const songUrl =  song.external_urls.spotify
 
-            listOfSongs.push({title,
+            listOfSongs.push({name,
                 artist,
                 album,
                 popularity,
@@ -149,10 +174,10 @@ app.get('/top', async function(req, res) {
 
         console.log(listOfSongs);
         res.json(listOfSongs);
-      });
 
-
-
+    }).catch(err => {
+        res.status(401).json({ status:401 , msg: 'Not logged in' });
+    });
 });
 
 const port = 8888;
