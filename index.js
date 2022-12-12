@@ -5,6 +5,7 @@ const axios = require('axios')
 const express = require('express');
 const querystring = require('querystring');
 let userId = '00'
+const PORT = process.env.PORT || 8888;
 
 
 const firebaseConfig = {
@@ -180,7 +181,6 @@ app.get('/top', async function(req, res) {
     });
 });
 
-const port = 8888;
-app.listen(port, () => {
-    console.log(`Server started on ${port}`);
+app.listen(PORT, () => {
+    console.log(`Server started on ${PORT}`);
 });
