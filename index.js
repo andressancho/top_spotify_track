@@ -151,8 +151,8 @@ app.get('/top', async function(req, res) {
 
     customAxios.get('https://api.spotify.com/v1/me/top/tracks?'+ 
     querystring.stringify({
-        time_range: 'short_term',
-        limit: '10'
+        time_range: 'long_term',
+        limit: '50'
     })).then(response =>{
 
         let listOfSongs = []
