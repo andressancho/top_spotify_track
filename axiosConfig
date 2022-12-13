@@ -1,0 +1,60 @@
+const { getUser, setUser } = require('./database/database');
+const axios = require('axios');
+
+const accountsAxios = axios.create();
+const customAxios = axios.create();
+
+accountsAxios.interceptors.request.use(function (config) {
+    const headers = {
+            'Authorization': 'Basic ' + (new Buffer.from(process.env.CLIENT_ID + ':' + process.env.CLIENT_SECRET).toString('base64')),
+            "Content-Type": "application/x-www-form-urlencoded"
+    }
+    config.headers = headers;
+    return config;
+}, function (error) {
+    return Promise.reject(error);
+});
+
+customAxios.interceptors.request.use(async function (config) {
+    const data = await getUser();
+    const headers = 
+    {
+        'Authorization': 'Bearer ' + data.access_token,
+        "Content-Type": "application/json"
+    };
+    config.headers = headers;
+    return config;
+
+}, function (error) {
+    return Promise.reject(error);
+});
+
+customAxios.interceptors.response.use(function (response) {
+    return response;
+}, async function (error) {
+    let originalRequest = error.config;
+    if(error.response.status === 401){
+
+        const params = {
+            grant_type: 'refresh_token',
+            refresh_token: await getUser().refresh_token
+        };
+    
+        return accountsAxios.post('https://accounts.spotify.com/api/token',querystring.stringify(params)
+        ).then(async response => {
+            const access_token = response.data.access_token;
+            setUser({access_token});
+
+            return customAxios(originalRequest);
+        }).catch(err => {
+            console.log(err);
+        });
+    }
+    return Promise.reject(error);
+  });
+
+module.exports = {
+    axios,
+    accountsAxios,
+    customAxios
+}
